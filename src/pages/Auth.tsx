@@ -14,13 +14,16 @@ const Auth = () => {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   if (user) return <Navigate to="/channel" replace />
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    const res = mode === 'login' ? login(username, password) : register(username, password)
+    setLoading(true)
+    const res = mode === 'login' ? await login(username, password) : await register(username, password)
+    setLoading(false)
     if (!res.ok) {
       setError(res.error || 'Ошибка')
       return
@@ -86,9 +89,10 @@ const Auth = () => {
 
           <Button
             type="submit"
+            disabled={loading}
             className="w-full bg-gradient-to-r from-fuchsia-500 to-purple-600 font-semibold hover:from-fuchsia-600 hover:to-purple-700"
           >
-            {mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+            {loading ? 'Подождите...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </Button>
         </form>
 

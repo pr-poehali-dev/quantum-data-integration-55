@@ -24,7 +24,7 @@ const VideoView = () => {
     )
   }
 
-  const liked = user ? video.likedBy.includes(user.username) : false
+  const liked = user ? video.likedByMe : false
 
   const handleShare = async () => {
     const url = window.location.href

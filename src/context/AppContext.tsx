@@ -1,8 +1,11 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
+import func2url from '../../backend/func2url.json'
+
+const AUTH_URL = func2url.auth
+const VIDEOS_URL = func2url.videos
 
 export interface User {
   username: string
-  password: string
   subscribers: number
 }
 
@@ -14,103 +17,168 @@ export interface Video {
   thumbnail: string
   videoUrl: string
   publishAt: string
-  createdAt: number
+  createdAt: string
   likes: number
-  likedBy: string[]
+  likedByMe: boolean
 }
 
 interface AppContextType {
   user: User | null
   videos: Video[]
-  register: (username: string, password: string) => { ok: boolean; error?: string }
-  login: (username: string, password: string) => { ok: boolean; error?: string }
+  loadingVideos: boolean
+  register: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>
+  login: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>
   logout: () => void
-  addVideo: (v: Omit<Video, 'id' | 'author' | 'createdAt' | 'likes' | 'likedBy'>) => void
-  toggleLike: (id: string) => void
+  addVideo: (v: {
+    title: string
+    description: string
+    thumbnail: string
+    videoUrl: string
+    publishAt: string
+  }) => Promise<{ ok: boolean; error?: string }>
+  toggleLike: (id: string) => Promise<void>
   getVideo: (id: string) => Video | undefined
+  refreshVideos: () => Promise<void>
 }
 
 const AppContext = createContext<AppContextType | null>(null)
 
-const USERS_KEY = 'pl_users'
-const VIDEOS_KEY = 'pl_videos'
 const SESSION_KEY = 'pl_session'
 
-function load<T>(key: string, fallback: T): T {
+function loadSession(): User | null {
   try {
-    const raw = localStorage.getItem(key)
-    return raw ? (JSON.parse(raw) as T) : fallback
+    const raw = localStorage.getItem(SESSION_KEY)
+    return raw ? (JSON.parse(raw) as User) : null
   } catch {
-    return fallback
+    return null
   }
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [users, setUsers] = useState<User[]>(() => load<User[]>(USERS_KEY, []))
-  const [videos, setVideos] = useState<Video[]>(() => load<Video[]>(VIDEOS_KEY, []))
-  const [user, setUser] = useState<User | null>(() => load<User | null>(SESSION_KEY, null))
+  const [user, setUser] = useState<User | null>(() => loadSession())
+  const [videos, setVideos] = useState<Video[]>([])
+  const [loadingVideos, setLoadingVideos] = useState(true)
 
-  useEffect(() => localStorage.setItem(USERS_KEY, JSON.stringify(users)), [users])
-  useEffect(() => localStorage.setItem(VIDEOS_KEY, JSON.stringify(videos)), [videos])
-  useEffect(() => localStorage.setItem(SESSION_KEY, JSON.stringify(user)), [user])
+  useEffect(() => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user))
+  }, [user])
 
-  const register = (username: string, password: string) => {
-    const name = username.trim()
-    if (!name || !password) return { ok: false, error: 'Заполните все поля' }
-    if (users.some((u) => u.username.toLowerCase() === name.toLowerCase()))
-      return { ok: false, error: 'Такой пользователь уже существует' }
-    const newUser: User = { username: name, password, subscribers: 0 }
-    setUsers((prev) => [...prev, newUser])
-    setUser(newUser)
-    return { ok: true }
+  const refreshVideos = useCallback(async () => {
+    setLoadingVideos(true)
+    try {
+      const res = await fetch(VIDEOS_URL, {
+        headers: user ? { 'X-Username': user.username } : {},
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setVideos(data)
+      }
+    } catch {
+      /* сеть недоступна */
+    } finally {
+      setLoadingVideos(false)
+    }
+  }, [user])
+
+  useEffect(() => {
+    refreshVideos()
+  }, [refreshVideos])
+
+  const register = async (username: string, password: string) => {
+    try {
+      const res = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'register', username, password }),
+      })
+      const data = await res.json()
+      if (!res.ok) return { ok: false, error: data.error || 'Ошибка регистрации' }
+      setUser({ username: data.username, subscribers: data.subscribers })
+      return { ok: true }
+    } catch {
+      return { ok: false, error: 'Не удалось подключиться к серверу' }
+    }
   }
 
-  const login = (username: string, password: string) => {
-    const found = users.find(
-      (u) => u.username.toLowerCase() === username.trim().toLowerCase() && u.password === password
-    )
-    if (!found) return { ok: false, error: 'Неверный логин или пароль' }
-    setUser(found)
-    return { ok: true }
+  const login = async (username: string, password: string) => {
+    try {
+      const res = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', username, password }),
+      })
+      const data = await res.json()
+      if (!res.ok) return { ok: false, error: data.error || 'Ошибка входа' }
+      setUser({ username: data.username, subscribers: data.subscribers })
+      return { ok: true }
+    } catch {
+      return { ok: false, error: 'Не удалось подключиться к серверу' }
+    }
   }
 
   const logout = () => setUser(null)
 
-  const addVideo: AppContextType['addVideo'] = (v) => {
-    if (!user) return
-    const video: Video = {
-      ...v,
-      id: crypto.randomUUID(),
-      author: user.username,
-      createdAt: Date.now(),
-      likes: 0,
-      likedBy: [],
+  const addVideo: AppContextType['addVideo'] = async (v) => {
+    if (!user) return { ok: false, error: 'Не авторизован' }
+    try {
+      const res = await fetch(VIDEOS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          author: user.username,
+          title: v.title,
+          description: v.description,
+          thumbnail: v.thumbnail,
+          videoUrl: v.videoUrl,
+          publishAt: v.publishAt,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) return { ok: false, error: data.error || 'Ошибка публикации' }
+      await refreshVideos()
+      return { ok: true }
+    } catch {
+      return { ok: false, error: 'Не удалось подключиться к серверу' }
     }
-    setVideos((prev) => [video, ...prev])
   }
 
-  const toggleLike = (id: string) => {
+  const toggleLike = async (id: string) => {
     if (!user) return
     setVideos((prev) =>
-      prev.map((v) => {
-        if (v.id !== id) return v
-        const liked = v.likedBy.includes(user.username)
-        return {
-          ...v,
-          likedBy: liked
-            ? v.likedBy.filter((n) => n !== user.username)
-            : [...v.likedBy, user.username],
-          likes: liked ? v.likes - 1 : v.likes + 1,
-        }
-      })
+      prev.map((v) =>
+        v.id === id
+          ? { ...v, likedByMe: !v.likedByMe, likes: v.likedByMe ? v.likes - 1 : v.likes + 1 }
+          : v
+      )
     )
+    try {
+      await fetch(VIDEOS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'like', username: user.username, videoId: id }),
+      })
+    } catch {
+      /* откат не критичен, обновим при следующей загрузке */
+    }
   }
 
   const getVideo = (id: string) => videos.find((v) => v.id === id)
 
   return (
     <AppContext.Provider
-      value={{ user, videos, register, login, logout, addVideo, toggleLike, getVideo }}
+      value={{
+        user,
+        videos,
+        loadingVideos,
+        register,
+        login,
+        logout,
+        addVideo,
+        toggleLike,
+        getVideo,
+        refreshVideos,
+      }}
     >
       {children}
     </AppContext.Provider>

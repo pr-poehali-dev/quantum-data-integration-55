@@ -1,0 +1,17 @@
+{
+  "tests": [
+    {
+      "name": "OPTIONS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Register without data fails",
+      "method": "POST",
+      "path": "/",
+      "body": {"action": "register", "username": "", "password": ""},
+      "expectedStatus": 400
+    }
+  ]
+}

@@ -53,13 +53,18 @@ const Upload = () => {
       return
     }
     setLoading(true)
-    addVideo({
+    const res = await addVideo({
       title: title.trim(),
       description: description.trim(),
       thumbnail,
       videoUrl,
-      publishAt: publishAt || new Date().toISOString(),
+      publishAt: publishAt ? new Date(publishAt).toISOString() : new Date().toISOString(),
     })
+    setLoading(false)
+    if (!res.ok) {
+      toast({ title: 'Не удалось опубликовать видео', description: res.error, variant: 'destructive' })
+      return
+    }
     toast({ title: 'Видео опубликовано!', description: 'Оно появилось на канале и во «Всех видео».' })
     navigate('/videos')
   }
@@ -140,8 +145,8 @@ const Upload = () => {
           disabled={loading}
           className="w-full bg-gradient-to-r from-fuchsia-500 to-purple-600 font-semibold hover:from-fuchsia-600 hover:to-purple-700"
         >
-          <Icon name="Upload" size={16} />
-          Опубликовать
+          <Icon name={loading ? 'Loader' : 'Upload'} size={16} className={loading ? 'animate-spin' : ''} />
+          {loading ? 'Публикуем...' : 'Опубликовать'}
         </Button>
       </form>
     </div>
