@@ -1,9 +1,6 @@
 import json
 import os
-import base64
-import uuid
 import psycopg2
-import boto3
 
 SCHEMA = os.environ['MAIN_DB_SCHEMA']
 
@@ -11,27 +8,6 @@ SCHEMA = os.environ['MAIN_DB_SCHEMA']
 def get_conn():
     conn = psycopg2.connect(os.environ['DATABASE_URL'])
     return conn, conn.cursor()
-
-
-def upload_file(data_url: str, folder: str, ext_default: str) -> str:
-    if not data_url or ',' not in data_url:
-        return ''
-    header, b64data = data_url.split(',', 1)
-    content_type = header.split(';')[0].replace('data:', '') or 'application/octet-stream'
-    ext = ext_default
-    if '/' in content_type:
-        ext = content_type.split('/')[1]
-    file_bytes = base64.b64decode(b64data)
-    key = f'{folder}/{uuid.uuid4()}.{ext}'
-
-    s3 = boto3.client(
-        's3',
-        endpoint_url='https://bucket.poehali.dev',
-        aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
-        aws_secret_access_key=os.environ['AWS_SECRET_ACCESS_KEY'],
-    )
-    s3.put_object(Bucket='files', Key=key, Body=file_bytes, ContentType=content_type)
-    return f"https://cdn.poehali.dev/projects/{os.environ['AWS_ACCESS_KEY_ID']}/bucket/{key}"
 
 
 def handler(event: dict, context) -> dict:
@@ -119,14 +95,11 @@ def handler(event: dict, context) -> dict:
         title = (body.get('title') or '').strip()
         description = body.get('description') or ''
         publish_at = body.get('publishAt')
-        thumbnail_data = body.get('thumbnail') or ''
-        video_data = body.get('videoUrl') or ''
+        thumbnail_url = body.get('thumbnail') or ''
+        video_url = body.get('videoUrl') or ''
 
-        if not author or not title or not video_data:
+        if not author or not title or not video_url:
             return {'statusCode': 400, 'headers': headers, 'body': json.dumps({'error': 'Не хватает данных для публикации'})}
-
-        thumbnail_url = upload_file(thumbnail_data, 'thumbnails', 'jpg') if thumbnail_data.startswith('data:') else thumbnail_data
-        video_url = upload_file(video_data, 'videos', 'mp4') if video_data.startswith('data:') else video_data
 
         conn, cur = get_conn()
         try:
